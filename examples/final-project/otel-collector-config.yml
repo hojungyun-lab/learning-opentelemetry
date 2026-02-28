@@ -1,0 +1,69 @@
+# otel-collector-config.yml
+# OpenTelemetry Collector 파이프라인 설정
+#
+# 데이터 흐름:
+# App → OTLP Receiver → Batch Processor → Jaeger Exporter (traces)
+#                                       → Prometheus Exporter (metrics)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # 메모리 보호
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # 헬스 체크 경로 필터링
+  filter/health:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["url.path"] == "/health"'
+
+  # 배치 처리
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  # 디버그 출력
+  debug:
+    verbosity: basic
+
+  # Jaeger로 Traces 전송 (OTLP)
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Prometheus용 메트릭 엔드포인트
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/health, batch]
+      exporters: [otlp/jaeger, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]
+
+  telemetry:
+    logs:
+      level: info

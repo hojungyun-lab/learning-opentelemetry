@@ -1,0 +1,66 @@
+# docker-compose.yml
+# OpenTelemetry 실전 프로젝트 — 전체 스택 오케스트레이션
+#
+# 서비스 구성:
+# - order-service:     주문 서비스 (FastAPI, port 8001)
+# - inventory-service: 재고 서비스 (FastAPI, port 8002)
+# - otel-collector:    텔레메트리 수집·가공 서버
+# - jaeger:            트레이스 시각화 백엔드
+# - prometheus:        메트릭 수집 백엔드
+
+services:
+  # --- 애플리케이션 서비스 ---
+
+  order-service:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - INVENTORY_SERVICE_URL=http://inventory-service:8002
+      - DEPLOYMENT_ENV=development
+    depends_on:
+      - otel-collector
+      - inventory-service
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - DEPLOYMENT_ENV=development
+    depends_on:
+      - otel-collector
+
+  # --- 인프라 서비스 ---
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus 메트릭 엔드포인트
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317"         # OTLP gRPC (내부용)
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
